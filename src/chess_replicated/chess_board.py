@@ -597,6 +597,7 @@ class Board:
         king_start_pos = Utility.WHITE_KING_START_POSITION if team == Team.WHITE else Utility.BLACK_KING_START_POSITION
         rook_start_pos = king_start_pos + 3
         enemy_turn = Team.BLACK if team == Team.WHITE else Team.WHITE
+        if not self.isSquareSafe(king_start_pos, enemy_turn): return False
         if(self.getSquare(king_start_pos).isEmpty() or self.getSquare(rook_start_pos).isEmpty()): return False
         pice_should_be_king = self.getSquare(king_start_pos).getPiece()
         piece_should_be_rook = self.getSquare(rook_start_pos).getPiece()
@@ -614,6 +615,7 @@ class Board:
         king_start_pos = Utility.WHITE_KING_START_POSITION if team == Team.WHITE else Utility.BLACK_KING_START_POSITION
         rook_start_pos = king_start_pos - 4
         enemy_turn = Team.BLACK if team == Team.WHITE else Team.WHITE
+        if not self.isSquareSafe(king_start_pos, enemy_turn): return False
         if(self.getSquare(king_start_pos).isEmpty() or self.getSquare(rook_start_pos).isEmpty()): return False
         pice_should_be_king = self.getSquare(king_start_pos).getPiece()
         piece_should_be_rook = self.getSquare(rook_start_pos).getPiece()

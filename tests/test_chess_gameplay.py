@@ -16,7 +16,7 @@ from src.chess_replicated.chess_board import (
     Queen,
     Rook,
 )
-from src.chess_replicated.enum_chess import Team
+from src.chess_replicated.enum_chess import MoveType, Team
 from src.chess_replicated.mouse_repeat import MouseHoldRepeater
 from src.chess_replicated.ui import UI
 from src.menu.menu import get_config
@@ -225,6 +225,41 @@ class ChessGameplayTests(unittest.TestCase):
         board.getSquare(63).setPiece(Rook(Team.WHITE, 63))
         board.getSquare(52).setPiece(Bishop(Team.BLACK, 52))
         self.assertFalse(board.canShortCastle(Team.WHITE))
+
+    def test_castling_is_forbidden_when_king_starts_in_check(self):
+        board = Board()
+        for index in range(64):
+            board.getSquare(index).setPiece(None)
+
+        white_king = King(Team.WHITE, 60)
+        white_queenside_rook = Rook(Team.WHITE, 56)
+        white_kingside_rook = Rook(Team.WHITE, 63)
+        black_king = King(Team.BLACK, 4)
+        black_rook = Rook(Team.BLACK, 52)
+        for piece in (
+            white_king,
+            white_queenside_rook,
+            white_kingside_rook,
+            black_king,
+            black_rook,
+        ):
+            board.getSquare(piece.getPosition()).setPiece(piece)
+        board.white_king = white_king
+        board.black_king = black_king
+        board.turn = Team.WHITE
+        board.move_history = []
+        board.hash_code = board.zobrist.getFullHash(board)
+
+        self.assertFalse(board.kingIsSafe())
+        self.assertFalse(board.canShortCastle(Team.WHITE))
+        self.assertFalse(board.canLongCastle(Team.WHITE))
+        legal_moves = board.getAllLegalMove(Team.WHITE)
+        self.assertFalse(
+            any(
+                move.getType() in {MoveType.SHORT_CASTLE, MoveType.LONG_CASTLE}
+                for move in legal_moves
+            )
+        )
 
     def test_menu_returns_selected_engine_and_clock(self):
         events = [
