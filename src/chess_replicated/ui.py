@@ -441,7 +441,10 @@ class UI:
         self.clock_tick_at = now
         if self.clock_remaining[color] <= 0:
             winner = "BLACK" if color == Team.WHITE else "WHITE"
-            self.status_text = f"TIME: {color} ran out; {winner} wins."
+            if self.board.hasMatingMaterial(winner):
+                self.status_text = f"TIME: {color} ran out; {winner} wins."
+            else:                                   # FIDE 6.9: flag falls but the opponent cannot mate
+                self.status_text = f"TIME: {color} ran out, but {winner} cannot checkmate: draw."
             self.game_over = True
             self.autoplay = False
             return False
@@ -554,7 +557,9 @@ class UI:
         self.status_text = f"Alpha-Beta thinking (up to depth {depth})..."
 
         def work(board_copy):
-            return self.alphabeta.think_on(board_copy, depth, AI_TIME_LIMIT_SECONDS)
+            return self.alphabeta.think_on(
+                board_copy, depth, AI_TIME_LIMIT_SECONDS, history=dict(self.board_history)
+            )
 
         def finish(result):
             move_id, _, depth_done, nodes, seconds = result
@@ -586,7 +591,7 @@ class UI:
                 exploration=0.3,
                 rollout_depth=2,
             )
-            return None if move is None else (move.getStartPos(), move.getEndPos(), move.getType())
+            return None if move is None else move.getId()
 
         def finish(move_id):
             real_move = self.alphabeta.find_real_move(move_id)
@@ -665,10 +670,10 @@ class UI:
             else:
                 winner = "BLACK" if self.board.turn == Team.WHITE else "WHITE"
                 self.status_text = f"GAME OVER: {winner} WINS BY CHECKMATE."
-        elif self.board.isKingVsKing():
+        elif self.board.getAutomaticDrawReason() is not None:
             self.game_over = True
             self.autoplay = False
-            self.status_text = "GAME OVER: DRAW BY KING VS KING."
+            self.status_text = f"GAME OVER: DRAW BY {self.board.getAutomaticDrawReason()}."
         elif self.board_history.get(self.board.getHash(), 0) >= 3:
             self.game_over = True
             self.autoplay = False

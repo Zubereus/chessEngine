@@ -1,5 +1,5 @@
 import time
-from .alphabeta_fast import FastNegaMax, _move_id
+from .alphabeta_fast import ALL_FEATURES, FastNegaMax, _move_id
 
 
 class AIThinkTank:
@@ -22,17 +22,19 @@ class AIThinkTank:
         self._nodes = 0
         self._depth_done = 0
 
-    def think_on(self, work_board, depth, time_limit=None):
+    def think_on(self, work_board, depth, time_limit=None, history=None, features=ALL_FEATURES):
         """
         Search `work_board` (a private copy; safe to call from a worker thread).
+        `history` maps position hash -> times that position has occurred in the game, so the
+        search can avoid (or, when losing, aim for) repetitions.
         Returns (move_id, score, depth_completed, nodes, seconds), where
-        move_id = (start_pos, end_pos, move_type) or None.
+        move_id = (start_pos, end_pos, move_type, promotion) or None.
         """
         if len(self.transposition_table) > self.MAX_TABLE_SIZE:
             self.transposition_table.clear()
             self.best_moves.clear()
         started = time.time()
-        engine = FastNegaMax(work_board, self.transposition_table, self.best_moves)
+        engine = FastNegaMax(work_board, self.transposition_table, self.best_moves, history, features)
         move, score, done = engine.search(depth, time_limit)
         self._nodes, self._last_score, self._depth_done = engine.node_count, score, done
         move_id = None if move is None else _move_id(move)
@@ -42,15 +44,17 @@ class AIThinkTank:
         """Turn a move_id into the matching legal Move object of the real board."""
         if move_id is None:
             return None
+        # a 3-tuple (from, to, type) from an engine that cannot choose a promotion matches the first
+        # candidate in generation order, which is the queen promotion
         return next(
-            (m for m in self.board.getAllLegalMove(self.board.turn) if _move_id(m) == move_id),
+            filter(lambda m: _move_id(m)[:len(move_id)] == tuple(move_id), self.board.getAllLegalMove(self.board.turn)),
             None,
         )
 
-    def think(self, depth, time_limit=None):
+    def think(self, depth, time_limit=None, history=None):
         """Synchronous version. Returns (best_move, best_score) like before."""
         from copy import deepcopy
-        move_id, score, _, _, _ = self.think_on(deepcopy(self.board), depth, time_limit)
+        move_id, score, _, _, _ = self.think_on(deepcopy(self.board), depth, time_limit, history)
         return self.find_real_move(move_id), score
 
     def get_node_count(self):

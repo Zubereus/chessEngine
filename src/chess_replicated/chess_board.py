@@ -38,8 +38,10 @@ class Utility:
 
 
 class Move:
-    def __init__(self, piece, end_pos, move_type,  attacked_piece=None):
+    def __init__(self, piece, end_pos, move_type,  attacked_piece=None, promotion=None):
         self.piece = piece
+        self.promotion = promotion          # None, or one of 'Q' 'R' 'B' 'N' (pawn reaching the last rank)
+        self.prev_halfmove = 0              # filled by Board.makeMove so undoMove can restore the 50-move clock
         self.attacked_piece = attacked_piece
         self.start_pos = piece.getPosition()
         self.end_pos = end_pos
@@ -67,7 +69,12 @@ class Move:
         return self.is_attacking_move
     def isFirstMove(self):
         return self.first_move
-    
+    def getPromotion(self):
+        return self.promotion
+    def getId(self):
+        """Hashable identity of a move that survives board copies: (from, to, type, promotion)."""
+        return (self.start_pos, self.end_pos, self.move_type, self.promotion)
+
 
 class Piece(ABC):
     def __init__(self, piece_type, team, position, first_move=True):
@@ -115,10 +122,11 @@ class Pawn(Piece):
             proposed_pos = self.getPosition() + offset*i
             if(Utility.isValidPosition(proposed_pos)):
                 if offset == 8 and board.getSquare(proposed_pos).isEmpty():
-                    moveList.append(Move(self, proposed_pos, MoveType.PAWN))
-                    proposed_pos += offset*i
-                    if(self.isFirstMove() and board.getSquare(proposed_pos).isEmpty()):
-                        moveList.append(Move(self, proposed_pos, MoveType.PAWN_JUMP))
+                    moveList.extend(Pawn.withPromotions(self, proposed_pos, MoveType.PAWN))
+                    start_row = 1 if self.getTeam() == Team.BLACK else 6
+                    jump_pos = proposed_pos + offset*i
+                    if(self.isFirstMove() and self.getPosition() // 8 == start_row and board.getSquare(jump_pos).isEmpty()):
+                        moveList.append(Move(self, jump_pos, MoveType.PAWN_JUMP))
                 elif offset == 7 or offset == 9:
                     if(Pawn.isFileEdgeCase(self.getPosition(),offset*i)): continue
                     enpassantOffset = 1 if offset == 7 else -1
@@ -128,8 +136,15 @@ class Pawn(Piece):
                             moveList.append(Move(self,proposed_pos,MoveType.ENPASSENT))
                     
                     if not board.getSquare(proposed_pos).isEmpty() and board.getSquare(proposed_pos).getPiece().getTeam() != self.getTeam():
-                        moveList.append(Move(self,proposed_pos,MoveType.PAWN_ATTACK,board.getSquare(proposed_pos).getPiece()))
+                        moveList.extend(Pawn.withPromotions(self, proposed_pos, MoveType.PAWN_ATTACK, board.getSquare(proposed_pos).getPiece()))
         return moveList
+
+    @staticmethod
+    def withPromotions(pawn, end_pos, move_type, attacked=None):
+        """One Move normally; four (Q, R, B, N) when the pawn lands on the last rank."""
+        if end_pos // 8 in (0, 7):
+            return [Move(pawn, end_pos, move_type, attacked, promotion) for promotion in PROMOTION_ORDER]
+        return [Move(pawn, end_pos, move_type, attacked)]
        
     @staticmethod
     def isFileEdgeCase(position, offset):
@@ -295,6 +310,11 @@ class King(Piece):
         isEightEdgeCase = Utility.isEighthFile(position) and (offset == 1 or offset == 9 or offset == -7)
         return isFirstEdgeCase or isEightEdgeCase
 
+PROMOTION_ORDER = (PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT)
+PROMOTION_CLASS = {
+    PieceType.QUEEN: Queen, PieceType.ROOK: Rook, PieceType.BISHOP: Bishop, PieceType.KNIGHT: Knight,
+}
+
 _DIRECTIONS = (
     (-1, -1), (-1, 0), (-1, 1), (0, -1),
     (0, 1), (1, -1), (1, 0), (1, 1),
@@ -333,6 +353,7 @@ class Board:
         self.game_board = [Square(None) for _ in range(64)]
         self.turn = Team.WHITE
         self.move_history = []
+        self.halfmove_clock = 0             # plies since the last pawn move or capture (50-move rule)
         self.setUpStandardBoard()
         self.white_king = self.game_board[Utility.WHITE_KING_START_POSITION].getPiece()
         self.black_king = self.game_board[Utility.BLACK_KING_START_POSITION].getPiece()
@@ -464,6 +485,9 @@ class Board:
         end_square.setPiece(piece_to_move)
     
     def makeMove(self, move):
+        move.prev_halfmove = self.halfmove_clock
+        resets_clock = type(move.getPiece()) is Pawn or move.isAttackingMove() or move.getType() == MoveType.ENPASSENT
+        self.halfmove_clock = 0 if resets_clock else self.halfmove_clock + 1
         self.toggleTurn()
         self.movePiece(move.getStartPos(), move.getEndPos(), False)
         
@@ -484,7 +508,8 @@ class Board:
         elif m_type in [MoveType.PAWN, MoveType.PAWN_ATTACK]:
             piece_at_des = self.game_board[move.getEndPos()].getPiece()
             if piece_at_des is not None and Utility.isBackRank(piece_at_des):
-                promotion_piece = Queen(move.getPiece().getTeam(), move.getEndPos(), False)
+                promotion_class = PROMOTION_CLASS[move.getPromotion() or PieceType.QUEEN]
+                promotion_piece = promotion_class(move.getPiece().getTeam(), move.getEndPos(), False)
                 self.getSquare(move.getEndPos()).setPiece(promotion_piece)
         
         self.move_history.append(move)
@@ -521,11 +546,16 @@ class Board:
         else:
             attacked = move.getAttackedPiece()
             if attacked is not None:
-                attacked.setPosition(move.getEndPos())  # ← thêm sync
-                self.game_board[move.getEndPos()].setPiece(attacked)
+                # Put back a FRESH copy. The Move keeps its own snapshot untouched; re-inserting the
+                # stored object would alias it with the live board piece, and later moves would then
+                # mutate (first_move / position of) the snapshot that this Move restores next time.
+                restored = attacked.copyOf()
+                restored.setPosition(move.getEndPos())
+                self.game_board[move.getEndPos()].setPiece(restored)
             else:
                 self.game_board[move.getEndPos()].setPiece(None)
         self.toggleTurn()
+        self.halfmove_clock = move.prev_halfmove
         self.hash_code = None  # lazy: rebuilt in getHash() only when needed
 
     def kingIsSafe(self):
@@ -602,7 +632,7 @@ class Board:
         pice_should_be_king = self.getSquare(king_start_pos).getPiece()
         piece_should_be_rook = self.getSquare(rook_start_pos).getPiece()
 
-        if (isinstance(pice_should_be_king,King) and pice_should_be_king.isFirstMove() and isinstance(piece_should_be_rook,Rook)
+        if (type(pice_should_be_king) is King and pice_should_be_king.isFirstMove() and type(piece_should_be_rook) is Rook
             and piece_should_be_rook.isFirstMove() and self.getSquare(king_start_pos+1).isEmpty()
             and self.getSquare(king_start_pos+2).isEmpty()):
             for i in range(1,3):
@@ -619,7 +649,7 @@ class Board:
         if(self.getSquare(king_start_pos).isEmpty() or self.getSquare(rook_start_pos).isEmpty()): return False
         pice_should_be_king = self.getSquare(king_start_pos).getPiece()
         piece_should_be_rook = self.getSquare(rook_start_pos).getPiece()
-        if (isinstance(pice_should_be_king,King) and pice_should_be_king.isFirstMove() and isinstance(piece_should_be_rook,Rook)
+        if (type(pice_should_be_king) is King and pice_should_be_king.isFirstMove() and type(piece_should_be_rook) is Rook
             and piece_should_be_rook.isFirstMove() and self.getSquare(king_start_pos - 1).isEmpty()
             and self.getSquare(king_start_pos - 2).isEmpty() and self.getSquare(king_start_pos - 3).isEmpty()):
             for i in range(1,3):
@@ -682,8 +712,51 @@ class Board:
         pieces = [sq.getPiece() for sq in self.game_board if not sq.isEmpty()]
         return (
             len(pieces) == 2
-            and all(isinstance(piece, King) for piece in pieces)
+            and all(type(piece) is King for piece in pieces)
         )
+
+    def isInsufficientMaterial(self):
+        """
+        Dead position by material alone (FIDE 5.2.2): K v K, K+minor v K, and any number of
+        bishops that all stand on the same square colour (no knights, pawns, rooks, queens).
+        """
+        others = [
+            (index, square.pieceOnSquare)
+            for index, square in enumerate(self.game_board)
+            if square.pieceOnSquare is not None and type(square.pieceOnSquare) is not King
+        ]
+        if any(type(piece) in (Pawn, Rook, Queen) for _, piece in others):
+            return False
+        if len(others) <= 1:
+            return True
+        return (
+            all(type(piece) is Bishop for _, piece in others)
+            and len({(index // 8 + index % 8) % 2 for index, _ in others}) == 1
+        )
+
+    def hasMatingMaterial(self, team):
+        """
+        FIDE 6.9: can `team` still checkmate by ANY series of legal moves (cooperation allowed)?
+        A bare king never can; otherwise it depends on whether the position is a dead position by material.
+        """
+        has_pieces = any(
+            square.pieceOnSquare is not None
+            and square.pieceOnSquare.getTeam() == team
+            and type(square.pieceOnSquare) is not King
+            for square in self.game_board
+        )
+        return has_pieces and not self.isInsufficientMaterial()
+
+    def isFiftyMoveDraw(self):
+        return self.halfmove_clock >= 100
+
+    def getAutomaticDrawReason(self):
+        """Draws that need no repetition history. Call only after checking for checkmate/stalemate."""
+        if self.isInsufficientMaterial():
+            return "INSUFFICIENT MATERIAL"
+        if self.isFiftyMoveDraw():
+            return "FIFTY-MOVE RULE"
+        return None
 
     @staticmethod
     def pretty_print(square):
