@@ -1,6 +1,8 @@
 import pygame
 import os
 from src.chess_replicated.chess_board import Board
+from src.chess_replicated.display import create_display, toggle_fullscreen
+from src.chess_replicated.mouse_repeat import MouseHoldRepeater
 pygame.init()
 
 
@@ -24,11 +26,12 @@ def load_img(name, size=(60, 60)):
 
 
 def get_config():
-    screen = pygame.display.set_mode((960, 650))
+    screen_size = (960, 800)
+    screen = create_display(screen_size)
     pygame.display.set_caption("Chess Config Custom")
 
     font = pygame.font.SysFont("Arial", 24, bold=True)
-    small_font = pygame.font.SysFont("Arial", 18)
+    small_font = pygame.font.SysFont("Arial", 18, bold=True)
 
     # ===== CONFIG =====
     modes = ["Standard", "Custom"]
@@ -40,12 +43,14 @@ def get_config():
     LIMITS = [1, 1, 2, 2, 2, 8]
 
 
-    algorithm = "alphabeta vs alphabeta"
+    game_mode = "human vs ai"
+    algorithm = "alphabeta"
     depth = 2
     mcts_iterations = 100
+    clock_minutes = 10
 
-    WHITE_Y = 270
-    BLACK_Y = 450
+    WHITE_Y = 350
+    BLACK_Y = 530
 
     # ===== LOAD PIECES =====
     white_imgs = [load_img(f"w_{p}.png") for p in PIECES]
@@ -55,10 +60,23 @@ def get_config():
     btn_down1 = pygame.Rect(0,0,0,0)
     btn_up2 = pygame.Rect(0,0,0,0)
     btn_down2 = pygame.Rect(0,0,0,0)
+    btn_start = pygame.Rect(380, 730, 200, 50)
+    iteration_repeater = MouseHoldRepeater()
 
     clock = pygame.time.Clock()
 
     while True:
+        mouse_x, mouse_y = pygame.mouse.get_pos()
+        mouse_held = pygame.mouse.get_pressed()[0]
+        repeat_count = iteration_repeater.update(
+            pygame.time.get_ticks(),
+            mouse_held and btn_up2.collidepoint(mouse_x, mouse_y),
+        )
+        if repeat_count:
+            mcts_iterations = min(mcts_iterations + 10 * repeat_count, 10000)
+            if mcts_iterations == 10000:
+                iteration_repeater.stop()
+
         screen.fill((45, 45, 48))
         total_pieces = sum(white_counts) + sum(black_counts)
         max_cells = size * size
@@ -82,119 +100,90 @@ def get_config():
                     selected_mode = mode
         
 
-        # ===== ALGORITHM =====
-        label = font.render("ALGORITHM:", True, (255,255,255))
+        # ===== GAME MODE =====
+        label = font.render("PLAY:", True, (255,255,255))
         label_rect = label.get_rect()
         label_rect.midleft = (50, 100)
         screen.blit(label, label_rect)
 
-        btn_ab_vs_ab = pygame.Rect(250, 75, 150, 40)
-        btn_mcts_vs_mcts = pygame.Rect(420, 75, 150, 40)
-        btn_ab_vs_mcts = pygame.Rect(590, 75, 150, 40)
-        btn_mcts_vs_ab = pygame.Rect(760, 75, 150, 40)
+        btn_human_vs_ai = pygame.Rect(250, 75, 200, 40)
+        btn_ai_vs_ai = pygame.Rect(470, 75, 200, 40)
+        for button, value, text in (
+            (btn_human_vs_ai, "human vs ai", "HUMAN VS AI"),
+            (btn_ai_vs_ai, "ai vs ai", "AI VS AI"),
+        ):
+            pygame.draw.rect(
+                screen,
+                (0, 120, 215) if game_mode == value else (80, 80, 80),
+                button,
+                border_radius=5,
+            )
+            rendered = small_font.render(text, True, (255, 255, 255))
+            screen.blit(rendered, rendered.get_rect(center=button.center))
 
-        pygame.draw.rect(screen, (0,120,215) if algorithm=="alphabeta vs alphabeta" else (80,80,80), btn_ab_vs_ab, border_radius=5)
-        pygame.draw.rect(screen, (150,50,150) if algorithm=="mcts vs mcts" else (80,80,80), btn_mcts_vs_mcts, border_radius=5)
-        pygame.draw.rect(screen, (0,120,215) if algorithm=="alphabeta vs mcts" else (80,80,80), btn_ab_vs_mcts, border_radius=5)
-        pygame.draw.rect(screen, (150,50,150) if algorithm=="mcts vs alphabeta" else (80,80,80), btn_mcts_vs_ab, border_radius=5)
+        # ===== ALGORITHM =====
+        label = font.render("AI:", True, (255,255,255))
+        label_rect = label.get_rect()
+        label_rect.midleft = (50, 150)
+        screen.blit(label, label_rect)
 
-        ab_vs_ab_surf = font.render("A-B vs A-B", True, (255,255,255))
-        ab_vs_ab_rect = ab_vs_ab_surf.get_rect(center=btn_ab_vs_ab.center)
-        screen.blit(ab_vs_ab_surf, ab_vs_ab_rect)
+        btn_ab_vs_ab = pygame.Rect(250, 125, 150, 40)
+        btn_mcts_vs_mcts = pygame.Rect(420, 125, 150, 40)
+        btn_ab_vs_mcts = pygame.Rect(590, 125, 150, 40)
+        btn_mcts_vs_ab = pygame.Rect(760, 125, 150, 40)
+        ai_buttons = (
+            (btn_ab_vs_ab, "alphabeta", "ALPHA-BETA"),
+            (btn_mcts_vs_mcts, "mcts", "MONTE CARLO"),
+            (btn_ab_vs_mcts, "alphabeta vs mcts", "A-B vs MCTS"),
+            (btn_mcts_vs_ab, "mcts vs alphabeta", "MCTS vs A-B"),
+        )
+        visible_ai_buttons = ai_buttons[:2] if game_mode == "human vs ai" else ai_buttons
+        for button, value, text in visible_ai_buttons:
+            selected_algorithm = value
+            if game_mode == "ai vs ai" and value in {"alphabeta", "mcts"}:
+                selected_algorithm = f"{value} vs {value}"
+            is_selected = algorithm == selected_algorithm
+            pygame.draw.rect(
+                screen,
+                (150, 50, 150) if is_selected and "mcts" in selected_algorithm else
+                (0, 120, 215) if is_selected else (80, 80, 80),
+                button,
+                border_radius=5,
+            )
+            rendered = small_font.render(text, True, (255, 255, 255))
+            screen.blit(rendered, rendered.get_rect(center=button.center))
 
-        mcts_vs_mcts_surf = font.render("MCTS vs MCTS", True, (255,255,255))
-        mcts_vs_mcts_rect = mcts_vs_mcts_surf.get_rect(center=btn_mcts_vs_mcts.center)
-        screen.blit(mcts_vs_mcts_surf, mcts_vs_mcts_rect)
+        # ===== SEARCH SETTINGS =====
+        for label_text, value, up_button, down_button, y in (
+            ("DEPTH:", depth, pygame.Rect(250, 175, 40, 40), pygame.Rect(300, 175, 40, 40), 200),
+            ("ITERATIONS:", mcts_iterations, pygame.Rect(250, 225, 40, 40), pygame.Rect(300, 225, 40, 40), 250),
+        ):
+            screen.blit(font.render(label_text, True, (255,255,255)), (50, y - 5))
+            pygame.draw.rect(screen, (50,150,50), up_button, border_radius=5)
+            pygame.draw.rect(screen, (150,50,50), down_button, border_radius=5)
+            plus = font.render("+", True, (255,255,255))
+            minus = font.render("-", True, (255,255,255))
+            screen.blit(plus, plus.get_rect(center=up_button.center))
+            screen.blit(minus, minus.get_rect(center=down_button.center))
+            screen.blit(font.render(str(value), True, (255,255,0)), (360, y - 5))
+        btn_up1 = pygame.Rect(250, 175, 40, 40)
+        btn_down1 = pygame.Rect(300, 175, 40, 40)
+        btn_up2 = pygame.Rect(250, 225, 40, 40)
+        btn_down2 = pygame.Rect(300, 225, 40, 40)
 
-        ab_vs_mcts_surf = font.render("A-B vs MTCS", True, (255,255,255))
-        ab_vs_mcts_rect = ab_vs_mcts_surf.get_rect(center=btn_ab_vs_mcts.center)
-        screen.blit(ab_vs_mcts_surf, ab_vs_mcts_rect)
-
-        mcts_vs_ab_surf = font.render("MCTS vs A-B", True, (255,255,255))
-        mcts_vs_ab_rect = mcts_vs_ab_surf.get_rect(center=btn_mcts_vs_ab.center)
-        screen.blit(mcts_vs_ab_surf, mcts_vs_ab_rect)
-
-        # ===== DEPTH =====
-        if algorithm == "alphabeta vs alphabeta" or algorithm == "mcts vs mcts":
-            label_text = "DEPTH:" if algorithm == "alphabeta vs alphabeta" else "ITERATIONS:"
-            label = font.render(label_text, True, (255,255,255))
-            label_rect = label.get_rect()
-            label_rect.midleft = (50, 150)
-            screen.blit(label, label_rect)
-
-            btn_up1 = pygame.Rect(250, 125, 40, 40)
-            btn_down1 = pygame.Rect(300, 125, 40, 40)
-
-            is_ab = (algorithm == "alphabeta vs alphabeta")
-
-            pygame.draw.rect(screen, (50,150,50), btn_up1, border_radius=5)
-            pygame.draw.rect(screen, (150,50,50), btn_down1, border_radius=5)
-
-            plus_surf = font.render("+", True, (255,255,255))
-            plus_rect = plus_surf.get_rect(center=btn_up1.center)
-            screen.blit(plus_surf, plus_rect)
-            minus_surf = font.render("-", True, (255,255,255))
-            minus_rect = minus_surf.get_rect(center=btn_down1.center)
-            screen.blit(minus_surf, minus_rect)
-
-            if is_ab:
-                depth_text = str(depth)
-            else:
-                depth_text = str(mcts_iterations)
-            depth_surf = font.render(depth_text, True, (255,255,0))
-            depth_rect = depth_surf.get_rect()
-            depth_rect.midleft = (360, 145)
-            screen.blit(depth_surf, depth_rect)
-        else:
-            #===== DEPTH + ITERATION =====
-            label_text = "DEPTH:"
-            label = font.render(label_text, True, (255,255,255))
-            label_rect = label.get_rect()
-            label_rect.midleft = (50, 150)
-            screen.blit(label, label_rect)
-
-            btn_up1 = pygame.Rect(250, 125, 40, 40)
-            btn_down1 = pygame.Rect(300, 125, 40, 40)
-
-            pygame.draw.rect(screen, (50,150,50), btn_up1, border_radius=5)
-            pygame.draw.rect(screen, (150,50,50), btn_down1, border_radius=5)
-
-            plus_surf = font.render("+", True, (255,255,255))
-            plus_rect = plus_surf.get_rect(center=btn_up1.center)
-            screen.blit(plus_surf, plus_rect)
-            minus_surf = font.render("-", True, (255,255,255))
-            minus_rect = minus_surf.get_rect(center=btn_down1.center)
-            screen.blit(minus_surf, minus_rect)
-
-            depth_surf = font.render(str(depth), True, (255,255,0))
-            depth_rect = depth_surf.get_rect()
-            depth_rect.midleft = (360, 145)
-            screen.blit(depth_surf, depth_rect)
-
-
-            label_text = "ITERATIONS:"
-            label = font.render(label_text, True, (255,255,255))
-            label_rect = label.get_rect()
-            label_rect.midleft = (50, 200)
-            screen.blit(label, label_rect)
-
-            btn_up2 = pygame.Rect(250, 175, 40, 40)
-            btn_down2 = pygame.Rect(300, 175, 40, 40)
-
-            pygame.draw.rect(screen, (50,150,50), btn_up2, border_radius=5)
-            pygame.draw.rect(screen, (150,50,50), btn_down2, border_radius=5)
-
-            plus_surf = font.render("+", True, (255,255,255))
-            plus_rect = plus_surf.get_rect(center=btn_up2.center)
-            screen.blit(plus_surf, plus_rect)
-            minus_surf = font.render("-", True, (255,255,255))
-            minus_rect = minus_surf.get_rect(center=btn_down2.center)
-            screen.blit(minus_surf, minus_rect)
-
-            depth_surf = font.render(str(mcts_iterations), True, (255,255,0))
-            depth_rect = depth_surf.get_rect()
-            depth_rect.midleft = (360, 195)
-            screen.blit(depth_surf, depth_rect)
+        # ===== GAME CLOCK =====
+        screen.blit(font.render("CLOCK PER SIDE:", True, (255,255,255)), (50, 285))
+        btn_clock_down = pygame.Rect(280, 275, 40, 40)
+        btn_clock_up = pygame.Rect(460, 275, 40, 40)
+        for button, symbol, color in (
+            (btn_clock_down, "-", (150, 50, 50)),
+            (btn_clock_up, "+", (50, 150, 50)),
+        ):
+            pygame.draw.rect(screen, color, button, border_radius=5)
+            rendered = font.render(symbol, True, (255,255,255))
+            screen.blit(rendered, rendered.get_rect(center=button.center))
+        value = font.render(f"{clock_minutes} min", True, (255,255,0))
+        screen.blit(value, value.get_rect(center=(375, 295)))
 
         # ===== CUSTOM MODE =====
         if selected_mode == "Custom":
@@ -238,39 +227,82 @@ def get_config():
                 pygame.quit()
                 exit()
 
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
+                screen = toggle_fullscreen(screen_size)
+                continue
+
+            if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                iteration_repeater.stop()
+
             if event.type == pygame.MOUSEBUTTONDOWN:
                 mx, my = event.pos
 
-                if btn_ab_vs_ab.collidepoint(mx, my):
-                    algorithm = "alphabeta vs alphabeta"
+                if event.button == 1 and btn_up2.collidepoint(mx, my):
+                    mcts_iterations = min(mcts_iterations + 10, 10000)
+                    if mcts_iterations < 10000:
+                        iteration_repeater.start(pygame.time.get_ticks())
+                    else:
+                        iteration_repeater.stop()
 
-                if btn_mcts_vs_mcts.collidepoint(mx, my):
-                    algorithm = "mcts vs mcts"
+                if btn_human_vs_ai.collidepoint(mx, my):
+                    game_mode = "human vs ai"
+                    if algorithm not in {"alphabeta", "mcts"}:
+                        algorithm = "alphabeta"
+                elif btn_ai_vs_ai.collidepoint(mx, my):
+                    game_mode = "ai vs ai"
+                    if algorithm in {"alphabeta", "mcts"}:
+                        algorithm = f"{algorithm} vs {algorithm}"
 
-                if btn_ab_vs_mcts.collidepoint(mx, my):
-                    algorithm = "alphabeta vs mcts"
-
-                if btn_mcts_vs_ab.collidepoint(mx, my):
-                    algorithm = "mcts vs alphabeta"
+                if game_mode == "human vs ai":
+                    if btn_ab_vs_ab.collidepoint(mx, my):
+                        algorithm = "alphabeta"
+                    elif btn_mcts_vs_mcts.collidepoint(mx, my):
+                        algorithm = "mcts"
+                else:
+                    if btn_ab_vs_ab.collidepoint(mx, my):
+                        algorithm = "alphabeta vs alphabeta"
+                    elif btn_mcts_vs_mcts.collidepoint(mx, my):
+                        algorithm = "mcts vs mcts"
+                    elif btn_ab_vs_mcts.collidepoint(mx, my):
+                        algorithm = "alphabeta vs mcts"
+                    elif btn_mcts_vs_ab.collidepoint(mx, my):
+                        algorithm = "mcts vs alphabeta"
 
                 if btn_up1.collidepoint(mx, my):
-                    if algorithm == "alphabeta vs alphabeta" or algorithm == "alphabeta vs mcts" or algorithm == "mcts vs alphabeta":
-                        depth = min(depth + 1, 8)
-                    elif algorithm == "mcts vs mcts":
-                        mcts_iterations = min(mcts_iterations + 10, 200)
-
-                if btn_down1.collidepoint(mx, my):
-                    if algorithm == "alphabeta vs alphabeta" or algorithm == "alphabeta vs mcts" or algorithm == "mcts vs alphabeta":
-                        depth = max(depth - 1, 1)
-                    elif algorithm == "mcts vs mcts":
-                        mcts_iterations = max(mcts_iterations - 10, 10)
-
-                # XỬ LÝ NÚT UP/DOWN 2 (Chỉ dành cho Iterations khi ở chế độ đối đầu mixed)
-                if btn_up2.collidepoint(mx, my):
-                    mcts_iterations = min(mcts_iterations + 10, 200)
-                
+                    depth = min(depth + 1, 8)
+                elif btn_down1.collidepoint(mx, my):
+                    depth = max(depth - 1, 1)
                 if btn_down2.collidepoint(mx, my):
                     mcts_iterations = max(mcts_iterations - 10, 10)
+
+                if btn_clock_up.collidepoint(mx, my):
+                    clock_minutes = min(clock_minutes + 1, 180)
+                elif btn_clock_down.collidepoint(mx, my):
+                    clock_minutes = max(clock_minutes - 1, 1)
+
+                if btn_start.collidepoint(mx, my):
+                    pieces_keys = ["king", "queen", "bishop", "knight", "rook", "pawn"]
+                    white_dict = {
+                        pieces_keys[i]: white_counts[i]
+                        for i in range(6)
+                        if white_counts[i] > 0
+                    }
+                    black_dict = {
+                        pieces_keys[i]: black_counts[i]
+                        for i in range(6)
+                        if black_counts[i] > 0
+                    }
+                    board_config = Board()
+                    if selected_mode == "Custom":
+                        board_config.setUpRandomBoard(white_dict, black_dict)
+                    return (
+                        board_config,
+                        algorithm,
+                        depth,
+                        mcts_iterations,
+                        game_mode,
+                        clock_minutes,
+                    )
 
                 if selected_mode == "Custom":
                     for j, cnts in enumerate([white_counts, black_counts]):
@@ -290,24 +322,17 @@ def get_config():
 
         # ===== START =====
 
-        btn_start = pygame.Rect(380, 580, 200, 50)
-
         pygame.draw.rect(screen, (0,122,204), btn_start, border_radius=10)
         start_surf = font.render("START GAME", True, (255,255,255))
         start_rect = start_surf.get_rect(center=btn_start.center)
         screen.blit(start_surf, start_rect)
-
-        if pygame.mouse.get_pressed()[0]:
-            if btn_start.collidepoint(pygame.mouse.get_pos()):
-                PIECES_KEYS = ["king", "queen", "bishop", "knight", "rook", "pawn"]
-                white_dict = {PIECES_KEYS[i]: white_counts[i] for i in range(6) if white_counts[i] > 0}
-                black_dict = {PIECES_KEYS[i]: black_counts[i] for i in range(6) if black_counts[i] > 0}
-                # Trả về các giá trị đã được format đúng
-                board_config = Board()
-                if selected_mode == "Custom":
-                    board_config.setUpRandomBoard(white_dict, black_dict)
-                return board_config, algorithm, depth, mcts_iterations
-
+        fullscreen_hint = small_font.render(
+            "F11: FULLSCREEN", True, (170, 170, 175)
+        )
+        screen.blit(
+            fullscreen_hint,
+            fullscreen_hint.get_rect(bottomright=(930, 785)),
+        )
 
         pygame.display.flip()
         clock.tick(60)

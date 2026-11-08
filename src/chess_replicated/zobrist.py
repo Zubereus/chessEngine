@@ -1,10 +1,10 @@
-
 import random
 from .enum_chess import*
 class Zobrist:
     """
     Cấu trúc hash:
     - piece_vals[màu][loại quân][ô] — vị trí từng quân
+    - moved_piece_vals                 — trạng thái đã di chuyển của từng quân
     - black_to_move                 — lượt đi của Đen 
     - castles[4]                    — quyền nhập thành (trắng ngắn/dài, đen ngắn/dài)
     - en_passant[8]                 — cột en passant (a-h)
@@ -51,7 +51,22 @@ class Zobrist:
             ]
             for _ in range(2)
         ]
+        self.piece_table = {
+            (team, piece_type): self.piece_vals[Zobrist.TEAM_INDEX[team]][Zobrist.PIECE_INDEX[piece_type]]
+            for team in Zobrist.TEAM_INDEX
+            for piece_type in Zobrist.PIECE_INDEX
+        }
+        self.moved_piece_vals = [
+            [
+                [rng.getrandbits(64) for _ in range(64)]
+                for _ in range(6)
+            ]
+            for _ in range(2)
+        ]
     
+    def __deepcopy__(self, memo):
+        return self      # the tables never change, so copies can share them
+
     def getBlackToMove(self):
         return self.black_to_move
     
@@ -69,89 +84,71 @@ class Zobrist:
     def getFullHash(self, board):
         h = 0
         
+        # Only piece type + square matter. The "has moved" flags are redundant:
+        # castling rights are hashed below, and a pawn's first move follows from its row.
+        table = self.piece_table
         for index, square in enumerate(board.game_board):
-            if not square.isEmpty():
-                piece = square.getPiece()
-                h ^= self.getPieceValue(piece.getTeam(), piece.getPieceType(), index)
+            piece = square.pieceOnSquare
+            if piece is not None:
+                h ^= table[(piece.getTeam(), piece.getPieceType())][index]
         if board.turn == Team.BLACK:
             h ^= self.black_to_move
-        
-        if board.canShortCastle(Team.WHITE):
-            h ^= self.castle[Zobrist.WHITE_SHORT]
-        if board.canLongCastle(Team.WHITE):
-            h ^= self.castle[Zobrist.WHITE_LONG]
-        if board.canShortCastle(Team.BLACK):
-            h ^= self.castle[Zobrist.BLACK_SHORT]
-        if board.canLongCastle(Team.BLACK):
-            h ^= self.castle[Zobrist.BLACK_LONG]
+
+        for team, king_start, short_index, long_index in (
+            (Team.WHITE, 60, Zobrist.WHITE_SHORT, Zobrist.WHITE_LONG),
+            (Team.BLACK, 4, Zobrist.BLACK_SHORT, Zobrist.BLACK_LONG),
+        ):
+            king = board.getSquare(king_start).getPiece()
+            if (
+                king is None
+                or king.getPieceType() != PieceType.KING
+                or king.getTeam() != team
+                or not king.isFirstMove()
+            ):
+                continue
+            short_rook = board.getSquare(king_start + 3).getPiece()
+            if (
+                short_rook is not None
+                and short_rook.getPieceType() == PieceType.ROOK
+                and short_rook.getTeam() == team
+                and short_rook.isFirstMove()
+            ):
+                h ^= self.castle[short_index]
+            long_rook = board.getSquare(king_start - 4).getPiece()
+            if (
+                long_rook is not None
+                and long_rook.getPieceType() == PieceType.ROOK
+                and long_rook.getTeam() == team
+                and long_rook.isFirstMove()
+            ):
+                h ^= self.castle[long_index]
 
         #Luật bắt tốt qua đường
         #Cách hoạt động: nếu nước cuối có label "PAWN_JUMP" thì kiểm tra 2 bên trái, phải của pawn xem có tồn tại enemy_pawn không
         # Nếu có thì cột của enemy_pawn là enpassant col, cần phải thực hiện hashing
         last_move = board.peekLastMove()
 
-        if(last_move != None and last_move.getType() == MoveType.PAWN_JUMP):
-            left_square = board.getSquare(last_move.getEndPos() + 1)
-            if(not left_square.isEmpty()):
-                pice_left = left_square.getPiece()
-                if(pice_left.getTeam() == board.turn and pice_left.getPieceType() == PieceType.PAWN):
-                    ep_file = last_move.getEndPos() % 8
-                    h ^= self.en_passant[ep_file]
-                    return h
-
-            right_square = board.getSquare(last_move.getEndPos() - 1)
-            if (not right_square.isEmpty()):
-                piece_right = right_square.getPiece()
-                if(piece_right.getTeam() == board.turn and piece_right.getPieceType() == PieceType.PAWN):
-                    ep_file = last_move.getEndPos() % 8
-                    h ^= self.en_passant[ep_file]
+        if last_move is not None and last_move.getType() == MoveType.PAWN_JUMP:
+            end_pos = last_move.getEndPos()
+            row, col = divmod(end_pos, 8)
+            adjacent_positions = []
+            if col > 0:
+                adjacent_positions.append(row * 8 + col - 1)
+            if col < 7:
+                adjacent_positions.append(row * 8 + col + 1)
+            for position in adjacent_positions:
+                piece = board.getSquare(position).getPiece()
+                if (
+                    piece is not None
+                    and piece.getTeam() == board.turn
+                    and piece.getPieceType() == PieceType.PAWN
+                ):
+                    h ^= self.en_passant[col]
+                    break
         
         return h
     
 
-    def updateHash(self, hash_code, move, board):
-        start_pos = move.getStartPos()
-        end_pos = move.getEndPos()
-        piece = move.getPiece()
-        piece_type = piece.getPieceType()
-        team = piece.getTeam()
-        hasEnPassant = False
-        if board.canShortCastle(Team.WHITE):
-            hash_code ^= self.castle[self.WHITE_SHORT]
-        if board.canLongCastle(Team.WHITE):
-            hash_code ^= self.castle[self.WHITE_LONG]
-        if board.canShortCastle(Team.BLACK):
-            hash_code ^= self.castle[self.BLACK_SHORT]
-        if board.canLongCastle(Team.BLACK):
-            hash_code ^= self.castle[self.BLACK_LONG]
-        
-
-        #Bắt tốt qua đường
-        #Luật bắt tốt qua đường
-        #Cách hoạt động: nếu nước cuối có label "PAWN_JUMP" thì kiểm tra 2 bên trái, phải của pawn xem có tồn tại enemy_pawn không
-        # Nếu có thì cột của enemy_pawn là enpassant col, cần phải thực hiện hashing
-        last_move = board.peekLastMove()
-
-        if(last_move != None and last_move.getType() == MoveType.PAWN_JUMP):
-            left_square = board.getSquare(last_move.getEndPos() + 1)
-            if(not left_square.isEmpty()):
-                piece_left = left_square.getPiece()
-                if(piece_left.getTeam() == board.turn and piece_left.getPieceType() == PieceType.PAWN):
-                    ep_file = last_move.getEndPos() % 8
-                    hash_code ^= self.en_passant[ep_file]
-                    hasEnPassant = True
-            if(not hasEnPassant):
-                right_square = board.getSquare(last_move.getEndPos() - 1)
-                if (not right_square.isEmpty()):
-                    piece_right = right_square.getPiece()
-                    if(piece_right.getTeam() == board.turn and piece_right.getPieceType() == PieceType.PAWN):
-                        ep_file = last_move.getEndPos() % 8
-                        hash_code ^= self.en_passant[ep_file]
-        #Lần hash đầu tiên nếu quân cờ đã có trong hash table, loại bỏ
-        hash_code ^= self.getPieceValue(team, piece_type,start_pos)
-        #Khi ở vị trí mới thì thêm vào
-        hash_code ^= self.getPieceValue(team, piece_type,end_pos)
-        hash_code ^= self.black_to_move
-        return hash_code
-        
-
+    def updateHash(self, board):
+        """Rebuild the position hash, including castling and en-passant state."""
+        return self.getFullHash(board)

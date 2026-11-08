@@ -51,26 +51,11 @@ class Evaluator:
         return None
 
     @staticmethod
-    def _piece_team_from_color(color):
-        return Team.WHITE if color == "white" else Team.BLACK
-
-    @staticmethod
     def evaluate_dynamic(board, color):
         whitePieces = Evaluator._collect_team_pieces(board, Team.WHITE)
         blackPieces = Evaluator._collect_team_pieces(board, Team.BLACK)
         whiteKing = Evaluator._find_king(whitePieces)
         blackKing = Evaluator._find_king(blackPieces)
-
-        # Special case: Tàn cuộc chỉ còn 2 vua, khuyến khích chúng ra giữa bàn để đối đầu nhau
-        if len(whitePieces) == 1 and len(blackPieces) == 1 and whiteKing is not None and blackKing is not None:
-            wr, wc = Evaluator._piece_pos(whiteKing)
-            br, bc = Evaluator._piece_pos(blackKing)
-            dist = abs(wr - br) + abs(wc - bc)
-            # Hai vua canh tranh nhau, ai gần hơn sẽ có điểm cao hơn
-            if color == "white":
-                return 100 - dist * 10
-            else:
-                return -(100 - dist * 10)
 
         if board.isEndGameScenario():
             # Nếu mất Vua
@@ -84,17 +69,15 @@ class Evaluator:
                 return -999999 if color == board_turn else 999999
             return 0
 
+        if Evaluator._is_insufficient_material(whitePieces, blackPieces):
+            return 0
+
         # Special case: Tàn cuộc chỉ còn xe và vua, dùng kỹ thuật dồn vua vào góc
         if Evaluator._is_rook_endgame(whitePieces, blackPieces):
             return Evaluator._evaluate_rook_endgame(whitePieces, blackPieces, whiteKing, blackKing, color)
 
         white_score = sum(Evaluator._get_piece_val(p, 8, board, whitePieces, blackPieces) for p in whitePieces)
         black_score = sum(Evaluator._get_piece_val(p, 8, board, whitePieces, blackPieces) for p in blackPieces)
-
-        # Thưởng cho bên có nhiều quân hơn (khuyến khích ăn quân)
-        white_count = len(whitePieces)
-        black_count = len(blackPieces)
-        piece_count_bonus = (white_count - black_count) * 15
 
         # Thưởng cho bên đang chiếu vua đối phương (tạo áp lực trực tiếp)
         check_bonus = Evaluator._evaluate_check_pressure(board, color)
@@ -103,8 +86,38 @@ class Evaluator:
         # nếu biết dồn vua đối phương vào biên/góc và áp sát để kết thúc ván.
         mop_up_bonus = Evaluator._evaluate_mop_up_endgame(whitePieces, blackPieces, whiteKing, blackKing)
 
-        total = (white_score - black_score) + piece_count_bonus + check_bonus + mop_up_bonus
+        total = (white_score - black_score) + check_bonus + mop_up_bonus
         return total if color == "white" else -total
+
+    @staticmethod
+    def _is_insufficient_material(whitePieces, blackPieces):
+        pieces = whitePieces + blackPieces
+        if any(
+            Evaluator._piece_type_name(piece) in ("pawn", "rook", "queen")
+            for piece in pieces
+        ):
+            return False
+
+        bishops = [
+            piece
+            for piece in pieces
+            if Evaluator._piece_type_name(piece) == "bishop"
+        ]
+        knights = [
+            piece
+            for piece in pieces
+            if Evaluator._piece_type_name(piece) == "knight"
+        ]
+        if len(bishops) + len(knights) <= 1:
+            return True
+        if not knights and bishops:
+            return len(
+                {
+                    sum(Evaluator._piece_pos(piece)) % 2
+                    for piece in bishops
+                }
+            ) == 1
+        return False
 
     @staticmethod
     def _evaluate_mop_up_endgame(whitePieces, blackPieces, whiteKing, blackKing):
@@ -174,8 +187,31 @@ class Evaluator:
     @staticmethod
     def _is_rook_endgame(whitePieces, blackPieces):
         """Kiểm tra có phải tàn cuộc chỉ còn xe và vua không"""
-        all_pieces = whitePieces + blackPieces
-        return all(Evaluator._piece_type_name(p) in ("rook", "king") for p in all_pieces)
+        white_rooks = [
+            piece for piece in whitePieces
+            if Evaluator._piece_type_name(piece) == "rook"
+        ]
+        black_rooks = [
+            piece for piece in blackPieces
+            if Evaluator._piece_type_name(piece) == "rook"
+        ]
+        if white_rooks and not black_rooks:
+            return (
+                len(blackPieces) == 1
+                and all(
+                    Evaluator._piece_type_name(piece) in ("rook", "king")
+                    for piece in whitePieces
+                )
+            )
+        if black_rooks and not white_rooks:
+            return (
+                len(whitePieces) == 1
+                and all(
+                    Evaluator._piece_type_name(piece) in ("rook", "king")
+                    for piece in blackPieces
+                )
+            )
+        return False
 
     @staticmethod
     def _evaluate_rook_endgame(whitePieces, blackPieces, whiteKing, blackKing, color):
@@ -232,30 +268,15 @@ class Evaluator:
 
             return -score if color == "white" else score
 
-        else:
-            # Cả hai bên đều có xe: đánh giá bình thường theo vật chất và vị trí
-            white_score = sum(Evaluator._get_piece_val(p, 8, None, whitePieces, blackPieces) for p in whitePieces)
-            black_score = sum(Evaluator._get_piece_val(p, 8, None, whitePieces, blackPieces) for p in blackPieces)
-            total = white_score - black_score
-            return total if color == "white" else -total
+        return 0
 
     @staticmethod
     def _evaluate_check_pressure(board, color):
         """Thưởng nếu ta đang chiếu vua đối phương, phạt nếu vua ta đang bị chiếu"""
-        bonus = 0
-        try:
-            # Nếu vua địch đang bị chiếu: thưởng lớn vì tạo được áp lực
-            opponent_turn = "black" if color == "white" else "white"
-            board_turn = "white" if board.turn == Team.WHITE else "black"
-            if board_turn == opponent_turn and not board.kingIsSafe():
-                bonus += 150
-
-            # Phạt nếu vua ta đang bị chiếu (vị trí nguy hiểm)
-            if board_turn == color and not board.kingIsSafe():
-                bonus -= 150
-        except Exception:
-            pass
-        return bonus
+        color_to_move = "white" if board.turn == Team.WHITE else "black"
+        if board.kingIsSafe():
+            return 0
+        return 150 if color_to_move != color else -150
 
     @staticmethod
     def _get_piece_val(piece, size, board=None, whitePieces=None, blackPieces=None):
@@ -302,38 +323,27 @@ class Evaluator:
 
         # 5. Mobility + tấn công tích cực (tách biệt ô tấn công và ô di chuyển thường)
         if board is not None and piece_type != "pawn":
-            try:
-                legal_moves = piece.generatePossibleMove(board)
-                attacker_value = Evaluator.VALUES.get(piece_type, 0)
+            legal_moves = piece.generatePossibleMove(board)
+            attacker_value = Evaluator.VALUES.get(piece_type, 0)
+            attack_count = 0
+            attack_bonus = 0
 
-                attack_count = 0
-                attack_bonus = 0
+            for move in legal_moves:
+                target_piece = board.getSquare(move.getEndPos()).getPiece()
+                if target_piece is None or target_piece.getTeam() == piece.getTeam():
+                    continue
+                attack_count += 1
+                capture_value = Evaluator.VALUES.get(
+                    Evaluator._piece_type_name(target_piece), 0
+                )
+                trade_quality = capture_value - attacker_value
+                if trade_quality > 0:
+                    attack_bonus += 40 + trade_quality // 10
+                elif trade_quality == 0:
+                    attack_bonus += 15
 
-                for move in legal_moves:
-                    target_square = board.getSquare(move.getEndPos())
-                    target_piece = target_square.getPiece() if target_square else None
-
-                    if target_piece is not None and target_piece.getTeam() != piece.getTeam():
-                        attack_count += 1
-                        capture_value = Evaluator.VALUES.get(Evaluator._piece_type_name(target_piece), 0)
-
-                        trade_quality = capture_value - attacker_value
-
-                        # 6. Chỉ thưởng tấn công khi xứng đáng, tránh khuyến khích hy sinh vô ích
-                        if trade_quality > 0:
-                            # Ăn có lời rõ ràng (ví dụ mã ăn hậu): thưởng lớn
-                            attack_bonus += 40 + trade_quality // 10
-                        elif trade_quality == 0:
-                            # Ăn ngang giá trị: thưởng nhỏ
-                            attack_bonus += 15
-                        # Ăn lỗ: không thưởng, tránh khuyến khích hy sinh vô ích
-
-                # 7. Mobility chỉ tính các ô không tấn công, tránh đếm trùng
-                non_attack_moves = len(legal_moves) - attack_count
-                bonus += non_attack_moves * 6 + attack_bonus
-
-            except Exception:
-                pass
+            non_attack_moves = len(legal_moves) - attack_count
+            bonus += non_attack_moves * 6 + attack_bonus
 
         return base + bonus
 
@@ -382,5 +392,104 @@ class Evaluator:
 # For MCTS
 
 def simple_evaluate(board, color):
-    board_color = "white" if color == Team.WHITE else "black"
-    return Evaluator.evaluate_dynamic(board, board_color)
+    """Fast material/position score from the requested side's perspective."""
+    values = Evaluator.VALUES
+    pieces = [
+        square.getPiece()
+        for square in board.game_board
+        if not square.isEmpty()
+    ]
+    white_pieces = [
+        piece for piece in pieces if piece.getTeam() == Team.WHITE
+    ]
+    black_pieces = [
+        piece for piece in pieces if piece.getTeam() == Team.BLACK
+    ]
+    if (
+        Evaluator._find_king(white_pieces) is not None
+        and Evaluator._find_king(black_pieces) is not None
+        and Evaluator._is_insufficient_material(white_pieces, black_pieces)
+    ):
+        return 0
+
+    piece_count = len(pieces)
+    pawns_by_team = {
+        Team.WHITE: [],
+        Team.BLACK: [],
+    }
+    bishops_by_team = {
+        Team.WHITE: 0,
+        Team.BLACK: 0,
+    }
+    pawn_files = {
+        Team.WHITE: [0] * 8,
+        Team.BLACK: [0] * 8,
+    }
+    for piece in pieces:
+        piece_type = piece.getPieceType()
+        if piece_type == PieceType.PAWN:
+            pawns_by_team[piece.getTeam()].append(piece)
+            pawn_files[piece.getTeam()][piece.getPosition() % 8] += 1
+        elif piece_type == PieceType.BISHOP:
+            bishops_by_team[piece.getTeam()] += 1
+
+    score = (
+        30 * (bishops_by_team[Team.WHITE] >= 2)
+        - 30 * (bishops_by_team[Team.BLACK] >= 2)
+    )
+    for team in (Team.WHITE, Team.BLACK):
+        sign = 1 if team == Team.WHITE else -1
+        score -= sign * sum(
+            12 * (file_count - 1)
+            for file_count in pawn_files[team]
+            if file_count > 1
+        )
+        for pawn in pawns_by_team[team]:
+            pawn_col = pawn.getPosition() % 8
+            if not any(
+                abs(other_pawn.getPosition() % 8 - pawn_col) == 1
+                for other_pawn in pawns_by_team[team]
+            ):
+                score -= sign * 10
+
+    for piece in pieces:
+        piece_type = piece.getPieceType()
+        piece_name = Evaluator._piece_type_name(piece)
+        team = piece.getTeam()
+        row, col = Evaluator._piece_pos(piece)
+        relative_row = row if team == Team.BLACK else 7 - row
+        center_distance = abs(3.5 - row) + abs(3.5 - col)
+        positional = 0
+        if piece_name == "pawn":
+            positional = relative_row * 8 + int(col in (3, 4)) * 8
+            enemy_team = Team.BLACK if team == Team.WHITE else Team.WHITE
+            passed = not any(
+                abs(Evaluator._piece_pos(enemy_pawn)[1] - col) <= 1
+                and (
+                    Evaluator._piece_pos(enemy_pawn)[0] < row
+                    if team == Team.WHITE
+                    else Evaluator._piece_pos(enemy_pawn)[0] > row
+                )
+                for enemy_pawn in pawns_by_team[enemy_team]
+            )
+            if passed:
+                positional += 20 + relative_row * 8
+
+        elif piece_name in ("knight", "bishop", "queen"):
+            positional = int((7 - center_distance) * 5)
+        elif piece_name == "rook":
+            friendly_pawns = pawn_files[team][col]
+            opponent = Team.BLACK if team == Team.WHITE else Team.WHITE
+            opponent_pawns = pawn_files[opponent][col]
+            if friendly_pawns == 0:
+                positional += 14 if opponent_pawns == 0 else 8
+        elif piece_name == "king":
+            if piece_count > 12:
+                positional = int(center_distance * 4)
+            else:
+                positional = int((7 - center_distance) * 4)
+
+        sign = 1 if team == Team.WHITE else -1
+        score += sign * (values[piece_name] + positional)
+
+    return score if color == Team.WHITE else -score

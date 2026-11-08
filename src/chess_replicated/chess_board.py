@@ -295,6 +295,16 @@ class King(Piece):
         isEightEdgeCase = Utility.isEighthFile(position) and (offset == 1 or offset == 9 or offset == -7)
         return isFirstEdgeCase or isEightEdgeCase
 
+_DIRECTIONS = (
+    (-1, -1), (-1, 0), (-1, 1), (0, -1),
+    (0, 1), (1, -1), (1, 0), (1, 1),
+)
+_KNIGHT_STEPS = (
+    (-2, -1), (-2, 1), (-1, -2), (-1, 2),
+    (1, -2), (1, 2), (2, -1), (2, 1),
+)
+
+
 class Square:
     def __init__(self, pieceOnSquare):
         self.pieceOnSquare = pieceOnSquare
@@ -478,7 +488,7 @@ class Board:
                 self.getSquare(move.getEndPos()).setPiece(promotion_piece)
         
         self.move_history.append(move)
-        self.hash_code = self.zobrist.updateHash(self.hash_code, move, self)
+        self.hash_code = None  # lazy: rebuilt in getHash() only when needed
             
 
     def undoMove(self):
@@ -516,18 +526,60 @@ class Board:
             else:
                 self.game_board[move.getEndPos()].setPiece(None)
         self.toggleTurn()
-        self.hash_code = self.zobrist.updateHash(self.hash_code, move, self)
+        self.hash_code = None  # lazy: rebuilt in getHash() only when needed
 
     def kingIsSafe(self):
         king = self.white_king if self.turn == Team.WHITE else self.black_king
 
         enemy_team = Team.BLACK if self.turn == Team.WHITE else Team.WHITE
         return self.isSquareSafe(king.getPosition(), enemy_team)
-    def isSquareSafe(self,position, enemy):
-        for move in self.getAllPossibleMove(enemy):
-            if move.getEndPos() == position:
-                return False
+    def isSquareSafe(self, position, enemy):
+        """True when no piece of team `enemy` attacks `position`."""
+        board = self.game_board
+        target_row, target_col = divmod(position, 8)
+
+        # pawns (type(x) is Pawn is much faster than isinstance on an ABC)
+        pawn_row = target_row - (1 if enemy == Team.BLACK else -1)
+        if 0 <= pawn_row < 8:
+            for pawn_col in (target_col - 1, target_col + 1):
+                if 0 <= pawn_col < 8:
+                    piece = board[pawn_row * 8 + pawn_col].pieceOnSquare
+                    if type(piece) is Pawn and piece.getTeam() == enemy:
+                        return False
+
+        for row_delta, col_delta in _KNIGHT_STEPS:
+            row, col = target_row + row_delta, target_col + col_delta
+            if 0 <= row < 8 and 0 <= col < 8:
+                piece = board[row * 8 + col].pieceOnSquare
+                if type(piece) is Knight and piece.getTeam() == enemy:
+                    return False
+
+        for row_delta, col_delta in _DIRECTIONS:
+            row, col = target_row + row_delta, target_col + col_delta
+            if 0 <= row < 8 and 0 <= col < 8:
+                piece = board[row * 8 + col].pieceOnSquare
+                if type(piece) is King and piece.getTeam() == enemy:
+                    return False
+
+        for row_step, col_step in _DIRECTIONS:
+            row, col = target_row + row_step, target_col + col_step
+            while 0 <= row < 8 and 0 <= col < 8:
+                piece = board[row * 8 + col].pieceOnSquare
+                if piece is not None:
+                    if piece.getTeam() == enemy:
+                        diagonal = row_step != 0 and col_step != 0
+                        piece_type = piece.getPieceType()
+                        if (
+                            piece_type == PieceType.QUEEN
+                            or diagonal and piece_type == PieceType.BISHOP
+                            or not diagonal and piece_type == PieceType.ROOK
+                        ):
+                            return False
+                    break
+                row += row_step
+                col += col_step
         return True
+
     def toggleTurn(self):
         self.turn = Team.WHITE if self.turn == Team.BLACK else Team.BLACK
     def getAllPossibleMove(self,team):
@@ -573,16 +625,42 @@ class Board:
             return True
         return False
 
-    def getAllLegalMove(self,team):
+    @staticmethod
+    def _move_may_expose_king(move, king_row, king_col):
+        """
+        A move can only leave our king in check if it is a king move, an
+        en-passant capture, or the moving piece stands on the same row, column
+        or diagonal as our king (it might be pinned). Every other move is legal
+        whenever the king is not already in check.
+        """
+        if type(move.getPiece()) is King or move.getType() == MoveType.ENPASSENT:
+            return True
+        row, col = divmod(move.getStartPos(), 8)
+        return (
+            row == king_row
+            or col == king_col
+            or abs(row - king_row) == abs(col - king_col)
+        )
+
+    def getAllLegalMove(self, team):
         feasible_move = []
         king = self.white_king if team == Team.WHITE else self.black_king
         enemy_turn = Team.BLACK if team == Team.WHITE else Team.WHITE
-        for posible_move in self.getAllPossibleMove(team):
-            self.makeMove(posible_move)
-            if(self.isSquareSafe(king.getPosition(),enemy_turn)):
+
+        possible_moves = self.getAllPossibleMove(team)   # also refreshes piece positions
+        king_pos = king.getPosition()
+        king_row, king_col = divmod(king_pos, 8)
+        in_check = not self.isSquareSafe(king_pos, enemy_turn)
+
+        for posible_move in possible_moves:
+            if in_check or self._move_may_expose_king(posible_move, king_row, king_col):
+                self.makeMove(posible_move)
+                if self.isSquareSafe(king.getPosition(), enemy_turn):
+                    feasible_move.append(posible_move)
+                self.undoMove()
+            else:
                 feasible_move.append(posible_move)
-            self.undoMove()
-        
+
         if (self.canShortCastle(team)):
             feasible_move.append(Move(king, king.getPosition() + 2, MoveType.SHORT_CASTLE))
 
@@ -594,11 +672,16 @@ class Board:
        return len(self.getAllLegalMove(self.turn)) == 0
     
     def getHash(self):
+        if self.hash_code is None:
+            self.hash_code = self.zobrist.getFullHash(self)
         return self.hash_code
 
     def isKingVsKing(self):
         pieces = [sq.getPiece() for sq in self.game_board if not sq.isEmpty()]
-        return len(pieces) == 2  # chỉ còn 2 vua
+        return (
+            len(pieces) == 2
+            and all(isinstance(piece, King) for piece in pieces)
+        )
 
     @staticmethod
     def pretty_print(square):
@@ -635,4 +718,3 @@ if __name__ == "__main__":
     board = Board()
     print("--- Trạng thái bàn cờ ban đầu ---")
     print(board)
-    
