@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/*.py": {
+      "maxDuration": 10,
+      "includeFiles": "src/**",
+      "excludeFiles": "{assets/**,tests/**,experiments/**,public/**,main.py,process.py,src/menu/**,src/setting.py,src/chess_replicated/ui.py,src/chess_replicated/display.py,src/chess_replicated/mouse_repeat.py,src/chess_replicated/alphabeta.py}"
+    }
+  },
+  "rewrites": [
+    { "source": "/", "destination": "/public/index.html" },
+    { "source": "/style.css", "destination": "/public/style.css" },
+    { "source": "/script.js", "destination": "/public/script.js" },
+    { "source": "/img/:path*", "destination": "/public/img/:path*" }
+  ]
+}

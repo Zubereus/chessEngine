@@ -1,6 +1,6 @@
 import unittest
 
-from api import api_response
+from api import MAX_MCTS_ITERATIONS, api_response
 
 STANDARD_START = {"type": "standard"}
 
@@ -71,6 +71,24 @@ class ChessApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertRegex(result["move"]["from"], r"^[a-h][1-8]$")
         self.assertEqual(result["iteration_count"], 2)
+
+    def test_mcts_accepts_maximum_iterations_and_rejects_more(self):
+        base_request = {
+            "start_position": STANDARD_START,
+            "moves": [],
+            "algorithm": "mcts",
+        }
+        status, result = api_response(
+            "ai-move", {**base_request, "mcts_iterations": MAX_MCTS_ITERATIONS}
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["iteration_count"], MAX_MCTS_ITERATIONS)
+
+        status, error = api_response(
+            "ai-move", {**base_request, "mcts_iterations": MAX_MCTS_ITERATIONS + 1}
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("mcts_iterations", error["error"])
 
 
 if __name__ == "__main__":

@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#262522">
+    <meta name="description" content="Play a clean game of chess against a custom Python engine.">
+    <title>Chess Engine | Play</title>
+    <link rel="stylesheet" href="./style.css">
+    <script type="module" src="./script.js"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="wordmark" href="#top" aria-label="Chess home">
+        <span>CHESS</span>
+      </a>
+    </header>
+
+    <main id="top" class="page-shell">
+      <section id="setup-screen" class="setup-screen" aria-labelledby="setup-title">
+        <form id="setup-form" class="setup-card">
+          <div class="setup-heading">
+            <h1 id="setup-title">New game</h1>
+            <p>Choose how to play.</p>
+          </div>
+          <div class="field-block">
+            <label for="game-mode">Game mode</label>
+            <select id="game-mode" name="game-mode">
+              <option value="human">Human (White) vs AI</option>
+              <option value="ai">AI vs AI</option>
+            </select>
+          </div>
+
+          <div id="human-algorithm-field" class="field-block">
+            <label for="human-algorithm">Black’s algorithm</label>
+            <select id="human-algorithm" name="human-algorithm">
+              <option value="alphabeta">Alpha-Beta</option>
+              <option value="mcts">MCTS</option>
+            </select>
+          </div>
+
+          <div id="ai-algorithms" class="algorithm-pair" hidden>
+            <div class="field-block">
+              <label for="white-algorithm">White’s algorithm</label>
+              <select id="white-algorithm" name="white-algorithm">
+                <option value="alphabeta">Alpha-Beta</option>
+                <option value="mcts">MCTS</option>
+              </select>
+            </div>
+            <div class="field-block">
+              <label for="black-algorithm">Black’s algorithm</label>
+              <select id="black-algorithm" name="black-algorithm">
+                <option value="mcts">MCTS</option>
+                <option value="alphabeta">Alpha-Beta</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="algorithm-pair">
+            <div class="field-block">
+              <label for="search-depth">Alpha-Beta depth</label>
+              <input id="search-depth" type="number" inputmode="numeric" min="1" max="8" value="2" required>
+              <small>Range: 1 to 8</small>
+            </div>
+            <div class="field-block">
+              <label for="mcts-iterations">MCTS iterations</label>
+              <input id="mcts-iterations" type="number" inputmode="numeric" min="1" max="500" value="100" required>
+              <small>Range: 1 to 500</small>
+            </div>
+          </div>
+
+          <button class="button button-primary button-wide" type="submit">Start game</button>
+          <div id="setup-error-message" class="error-message" role="alert" hidden>
+            <span id="setup-error-text"></span>
+            <button id="setup-retry-button" class="button button-retry" type="button">Retry</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="game-screen" class="game-screen" aria-labelledby="game-title" hidden>
+        <div class="game-heading">
+          <div>
+            <h1 id="game-title">Chess</h1>
+          </div>
+          <div class="heading-actions">
+            <button id="new-game-button" class="button button-light" type="button">New game</button>
+            <button id="back-button" class="button button-quiet" type="button">Back to menu</button>
+          </div>
+        </div>
+
+        <div class="game-layout">
+          <section class="board-column" aria-label="Chess board area">
+            <div class="board-topline">
+              <span id="turn-indicator" class="turn-indicator"><span class="turn-dot" aria-hidden="true"></span><span>Your turn</span></span>
+              <span id="game-status" class="status-pill">Ready</span>
+            </div>
+            <div id="board-wrap" class="board-wrap">
+              <div class="rank-labels" aria-hidden="true"><span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span></div>
+              <div id="chess-board" class="chess-board" role="grid" aria-label="Chess board"></div>
+              <div class="file-labels" aria-hidden="true"><span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span></div>
+            </div>
+            <div id="loading-indicator" class="loading-indicator" role="status" aria-live="polite" hidden>
+              <span class="spinner" aria-hidden="true"></span>
+              <span id="loading-message">The engine is thinking…</span>
+            </div>
+            <div id="error-message" class="error-message" role="alert" hidden>
+              <span id="error-text"></span>
+              <button id="retry-button" class="button button-retry" type="button">Retry</button>
+            </div>
+          </section>
+
+          <aside class="control-panel" aria-label="Game controls">
+            <div class="panel-section">
+              <h2 id="mode-summary">Human vs AI</h2>
+              <p id="algorithm-summary" class="muted-copy">Black · Alpha-Beta</p>
+            </div>
+
+            <div class="panel-divider"></div>
+
+            <div class="panel-section">
+              <div id="human-controls" class="control-stack">
+                <button id="human-run-ai" class="button button-primary button-wide" type="button" hidden>Run AI</button>
+              </div>
+              <div id="ai-controls" class="control-stack" hidden>
+                <button id="run-ai-button" class="button button-primary button-wide" type="button">Run AI</button>
+                <button id="auto-button" class="button button-light button-wide" type="button" aria-pressed="false">Auto: Off</button>
+              </div>
+              <button id="undo-button" class="text-button" type="button">Undo last turn</button>
+            </div>
+
+            <div class="panel-divider"></div>
+
+            <div class="panel-section result-section">
+              <h2>Last AI move</h2>
+              <p id="last-ai-result" class="result-copy">No AI moves yet.</p>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <div id="promotion-picker" class="promotion-backdrop" role="dialog" aria-modal="true" aria-labelledby="promotion-title" hidden>
+      <div class="promotion-card">
+        <h2 id="promotion-title">Choose a piece</h2>
+        <div id="promotion-options" class="promotion-options"></div>
+        <button id="cancel-promotion" class="text-button" type="button">Cancel</button>
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,3 +1,4 @@
 # Vercel deployment exclusions
 experiments/
 tests/
+/requirements.txt
