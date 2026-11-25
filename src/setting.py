@@ -17,10 +17,6 @@ COLOR_BTN_MCTS = (150, 50, 150)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
 
-# --- PATH ALGORITHM ---
-PATH_ALPHA_BETA = os.path.join(PROJECT_ROOT, "src", "algorithm", "alpha_beta_pruning.py")
-PATH_MCTS = os.path.join(PROJECT_ROOT, "src", "algorithm", "MCTS.py")
-
 # --- PATH IMAGE ---
 IMG_DIR = os.path.join(PROJECT_ROOT, "assets", "chess_img")
 
